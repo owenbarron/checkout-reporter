@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Example Assignments</title>
+  <style>
+    body{margin:0;background:#f6f8f8;color:#202b2a;font:14px/1.5 system-ui,sans-serif}
+    header{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;background:white;border-bottom:1px solid #dce5e3}
+    main{padding:24px}
+    table{width:100%;border-collapse:collapse;background:white}
+    th,td{padding:14px;text-align:left;border-bottom:1px solid #e4eae9}
+    button,a{padding:8px 11px;border:1px solid #16877e;border-radius:6px;background:#16877e;color:white;text-decoration:none;font:inherit;cursor:pointer}
+  </style>
+</head>
+<body>
+  <header><b>Assignments test fixture</b><a id="launch" href="__BOOKMARKLET__">Launch reporter</a></header>
+  <main>
+    <table>
+      <thead><tr><th>Container</th><th>User</th><th>Corporate Client</th><th id="assigned-header" aria-sort="descending">Assigned On</th><th>From Location</th></tr></thead>
+      <tbody><tr><td>Sample Container 1</td><td>Taylor Example</td><td>Example University</td><td>Aug 27, 2026 3:00 PM</td><td>Campus Cafe</td></tr></tbody>
+    </table>
+  </main>
+  <script>
+    window.__CHECKOUT_REPORTER_TEST_MODE__ = true;
+    const fixtureRows = [
+      {assignment_id:101,assigned_on:"2026-08-27T22:00:00.000Z",user:{full_name:"Taylor Example"},container:{unique_name:"Sample Container 1",corporateClient:{name:"Example University"}},from_location:{pretty_name:"Campus Cafe"}},
+      {assignment_id:102,assigned_on:"2026-08-27T22:00:12.000Z",user:{full_name:"Taylor Example"},container:{unique_name:"Sample Container 2",corporateClient:{name:"Example University"}},from_location:{pretty_name:"Campus Cafe"}},
+      {assignment_id:103,assigned_on:"2026-08-27T22:01:00.000Z",user:{full_name:"Morgan Example"},container:{unique_name:"Sample Container 3",corporateClient:{name:"Example University"}},from_location:{pretty_name:"Campus Cafe"}}
+    ];
+    if (new URLSearchParams(location.search).has("multi")) {
+      fixtureRows[2] = {...fixtureRows[2], container:{...fixtureRows[2].container, corporateClient:{name:"Example College"}}};
+    }
+    window.__mockReportPages = [];
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init = {}) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (!String(url).includes("/graphql")) return nativeFetch(input, init);
+      const body = JSON.parse(init.body || "{}");
+      if (body.operationName === "CheckoutReport") {
+        const page = body.variables?.pagination?.page || 1;
+        window.__mockReportPages.push(page);
+        document.body.dataset.reportPages = window.__mockReportPages.join(",");
+        const list = page === 1 ? fixtureRows.slice(0,2) : page === 2 ? fixtureRows.slice(2) : [];
+        return new Response(JSON.stringify({data:{listAssignment:{list}}}), {status:200,headers:{"content-type":"application/json"}});
+      }
+      return new Response(JSON.stringify({data:{listAssignment:{list:fixtureRows.slice(0,1)}}}), {status:200,headers:{"content-type":"application/json"}});
+    };
+    document.querySelector("#assigned-header").addEventListener("click", () => fetch("/graphql", {
+      method:"POST",
+      headers:{"content-type":"application/json","authorization":"test-token"},
+      body:JSON.stringify({
+        operationName:"Assignments",
+        query:"query Assignments { listAssignment { list { assignment_id } } }",
+        variables:{where:{},pagination:{page:1,size:25},order:[{field:"assigned_on",order:"DESC"}]}
+      })
+    }));
+  </script>
+</body>
+</html>
