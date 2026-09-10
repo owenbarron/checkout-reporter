@@ -4,10 +4,12 @@ A standalone bookmarklet that runs on the USEFULL Assignments admin page, pulls 
 
 [Open the installer](https://owenbarron.github.io/checkout-reporter/)
 
-- transactions by day and location;
+- daily totals with optional location and container-type breakdowns;
 - timestamped grouped-transaction detail.
 
 Multiple containers assigned to the same user at the same location within 30 seconds are one transaction by default. The threshold is editable in the side panel.
+
+Daily downloads are broken out by location by default. The side panel has independent Location and Container type checkboxes, so either, both, or neither dimension can be included. The transaction log always includes the container name and type for each assignment.
 
 The first sync pulls 14 days by default (editable up to 90). Later syncs resume from the newest locally stored assignment. A small internal overlap catches boundary rows, which assignment-ID deduplication safely skips.
 

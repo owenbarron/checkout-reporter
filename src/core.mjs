@@ -52,6 +52,13 @@ function normalizeApiRow(row) {
     "container.name",
     "container_name",
   ])) || "Container not named";
+  const containerType = text(first(row, [
+    "container.type.name",
+    "container.containerType.name",
+    "container.container_type.name",
+    "container_type.name",
+    "container_type_name",
+  ])) || "Container type not set";
   const sourceId = text(first(row, ["assignment_id", "assignmentId", "id", "_id"]));
   const clientName = text(first(row, [
     "container.corporateClient.name",
@@ -68,6 +75,7 @@ function normalizeApiRow(row) {
     user,
     location,
     container,
+    containerType,
     clientName,
   };
 }
@@ -104,40 +112,63 @@ function groupTransactions(records, gapSeconds = 30) {
           location: record.location,
           assignments: [],
           containers: [],
+          containerTypes: [],
         };
         transactions.push(current);
       }
       current.lastMs = Math.max(current.lastMs, record.assignedMs);
       current.assignments.push(record.id);
       current.containers.push(record.container);
+      current.containerTypes.push(record.containerType || "Container type not set");
     }
   }
 
   return transactions.sort((a, b) => a.assignedMs - b.assignedMs);
 }
 
-function dailyByLocation(transactions) {
+function dailyBreakdown(transactions, options = {}) {
+  const byLocation = options.byLocation !== false;
+  const byContainerType = options.byContainerType === true;
   const groups = new Map();
   for (const transaction of transactions) {
     const stamp = timestampParts(transaction.assignedMs);
     if (!stamp) continue;
-    const key = `${stamp.date}\u0000${transaction.location}`;
-    const current = groups.get(key) || {
-      date: stamp.date,
-      location: transaction.location,
-      transactions: 0,
-      containers: 0,
-    };
-    current.transactions += 1;
-    current.containers += transaction.assignments.length;
-    groups.set(key, current);
+    const typeCounts = new Map();
+    if (byContainerType) {
+      transaction.assignments.forEach((_, index) => {
+        const type = transaction.containerTypes?.[index] || "Container type not set";
+        typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+      });
+    } else {
+      typeCounts.set("", transaction.assignments.length);
+    }
+    for (const [containerType, containerCount] of typeCounts) {
+      const location = byLocation ? transaction.location : "";
+      const key = [stamp.date, location, containerType].join("\u0000");
+      const current = groups.get(key) || {
+        date: stamp.date,
+        ...(byLocation ? { location } : {}),
+        ...(byContainerType ? { containerType } : {}),
+        transactions: 0,
+        containers: 0,
+      };
+      current.transactions += 1;
+      current.containers += containerCount;
+      groups.set(key, current);
+    }
   }
   return [...groups.values()]
     .map((row) => ({
       ...row,
       containersPerTransaction: row.transactions ? row.containers / row.transactions : 0,
     }))
-    .sort((a, b) => b.date.localeCompare(a.date) || a.location.localeCompare(b.location));
+    .sort((a, b) => b.date.localeCompare(a.date)
+      || String(a.location || "").localeCompare(String(b.location || ""))
+      || String(a.containerType || "").localeCompare(String(b.containerType || "")));
+}
+
+function dailyByLocation(transactions) {
+  return dailyBreakdown(transactions, { byLocation: true, byContainerType: false });
 }
 
 function csvCell(value) {
@@ -153,13 +184,24 @@ function toCsv(headers, rows) {
   ].join("\r\n");
 }
 
-function dailyCsv(records, gapSeconds = 30) {
-  const daily = dailyByLocation(groupTransactions(records, gapSeconds));
+function dailyCsv(records, gapSeconds = 30, options = {}) {
+  const byLocation = options.byLocation !== false;
+  const byContainerType = options.byContainerType === true;
+  const daily = dailyBreakdown(groupTransactions(records, gapSeconds), { byLocation, byContainerType });
+  const headers = [
+    "Date",
+    ...(byLocation ? ["Location"] : []),
+    ...(byContainerType ? ["Container Type"] : []),
+    "Transactions",
+    "Containers Checked Out",
+    "Containers / Transaction",
+  ];
   return toCsv(
-    ["Date", "Location", "Transactions", "Containers Checked Out", "Containers / Transaction"],
+    headers,
     daily.map((row) => [
       row.date,
-      row.location,
+      ...(byLocation ? [row.location] : []),
+      ...(byContainerType ? [row.containerType] : []),
       row.transactions,
       row.containers,
       row.containersPerTransaction.toFixed(2),
@@ -170,7 +212,7 @@ function dailyCsv(records, gapSeconds = 30) {
 function transactionsCsv(records, gapSeconds = 30) {
   const transactions = groupTransactions(records, gapSeconds).sort((a, b) => b.assignedMs - a.assignedMs);
   return toCsv(
-    ["Date", "Time", "Location", "User", "Transaction ID", "Containers", "Container Names", "Assignment IDs"],
+    ["Date", "Time", "Location", "User", "Transaction ID", "Containers", "Container Names", "Container Types", "Assignment IDs"],
     transactions.map((transaction) => {
       const stamp = timestampParts(transaction.assignedMs);
       return [
@@ -181,6 +223,7 @@ function transactionsCsv(records, gapSeconds = 30) {
         transaction.id,
         transaction.assignments.length,
         transaction.containers.join(" | "),
+        transaction.containerTypes.join(" | "),
         transaction.assignments.join(" | "),
       ];
     }),
@@ -193,6 +236,7 @@ export default {
   normalizeApiRow,
   dedupeAssignments,
   groupTransactions,
+  dailyBreakdown,
   dailyByLocation,
   dailyCsv,
   transactionsCsv,

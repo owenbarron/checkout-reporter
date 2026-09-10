@@ -53,6 +53,13 @@ function normalizeApiRow(row) {
     "container.name",
     "container_name",
   ])) || "Container not named";
+  const containerType = text(first(row, [
+    "container.type.name",
+    "container.containerType.name",
+    "container.container_type.name",
+    "container_type.name",
+    "container_type_name",
+  ])) || "Container type not set";
   const sourceId = text(first(row, ["assignment_id", "assignmentId", "id", "_id"]));
   const clientName = text(first(row, [
     "container.corporateClient.name",
@@ -69,6 +76,7 @@ function normalizeApiRow(row) {
     user,
     location,
     container,
+    containerType,
     clientName,
   };
 }
@@ -105,40 +113,63 @@ function groupTransactions(records, gapSeconds = 30) {
           location: record.location,
           assignments: [],
           containers: [],
+          containerTypes: [],
         };
         transactions.push(current);
       }
       current.lastMs = Math.max(current.lastMs, record.assignedMs);
       current.assignments.push(record.id);
       current.containers.push(record.container);
+      current.containerTypes.push(record.containerType || "Container type not set");
     }
   }
 
   return transactions.sort((a, b) => a.assignedMs - b.assignedMs);
 }
 
-function dailyByLocation(transactions) {
+function dailyBreakdown(transactions, options = {}) {
+  const byLocation = options.byLocation !== false;
+  const byContainerType = options.byContainerType === true;
   const groups = new Map();
   for (const transaction of transactions) {
     const stamp = timestampParts(transaction.assignedMs);
     if (!stamp) continue;
-    const key = `${stamp.date}\u0000${transaction.location}`;
-    const current = groups.get(key) || {
-      date: stamp.date,
-      location: transaction.location,
-      transactions: 0,
-      containers: 0,
-    };
-    current.transactions += 1;
-    current.containers += transaction.assignments.length;
-    groups.set(key, current);
+    const typeCounts = new Map();
+    if (byContainerType) {
+      transaction.assignments.forEach((_, index) => {
+        const type = transaction.containerTypes?.[index] || "Container type not set";
+        typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+      });
+    } else {
+      typeCounts.set("", transaction.assignments.length);
+    }
+    for (const [containerType, containerCount] of typeCounts) {
+      const location = byLocation ? transaction.location : "";
+      const key = [stamp.date, location, containerType].join("\u0000");
+      const current = groups.get(key) || {
+        date: stamp.date,
+        ...(byLocation ? { location } : {}),
+        ...(byContainerType ? { containerType } : {}),
+        transactions: 0,
+        containers: 0,
+      };
+      current.transactions += 1;
+      current.containers += containerCount;
+      groups.set(key, current);
+    }
   }
   return [...groups.values()]
     .map((row) => ({
       ...row,
       containersPerTransaction: row.transactions ? row.containers / row.transactions : 0,
     }))
-    .sort((a, b) => b.date.localeCompare(a.date) || a.location.localeCompare(b.location));
+    .sort((a, b) => b.date.localeCompare(a.date)
+      || String(a.location || "").localeCompare(String(b.location || ""))
+      || String(a.containerType || "").localeCompare(String(b.containerType || "")));
+}
+
+function dailyByLocation(transactions) {
+  return dailyBreakdown(transactions, { byLocation: true, byContainerType: false });
 }
 
 function csvCell(value) {
@@ -154,13 +185,24 @@ function toCsv(headers, rows) {
   ].join("\r\n");
 }
 
-function dailyCsv(records, gapSeconds = 30) {
-  const daily = dailyByLocation(groupTransactions(records, gapSeconds));
+function dailyCsv(records, gapSeconds = 30, options = {}) {
+  const byLocation = options.byLocation !== false;
+  const byContainerType = options.byContainerType === true;
+  const daily = dailyBreakdown(groupTransactions(records, gapSeconds), { byLocation, byContainerType });
+  const headers = [
+    "Date",
+    ...(byLocation ? ["Location"] : []),
+    ...(byContainerType ? ["Container Type"] : []),
+    "Transactions",
+    "Containers Checked Out",
+    "Containers / Transaction",
+  ];
   return toCsv(
-    ["Date", "Location", "Transactions", "Containers Checked Out", "Containers / Transaction"],
+    headers,
     daily.map((row) => [
       row.date,
-      row.location,
+      ...(byLocation ? [row.location] : []),
+      ...(byContainerType ? [row.containerType] : []),
       row.transactions,
       row.containers,
       row.containersPerTransaction.toFixed(2),
@@ -171,7 +213,7 @@ function dailyCsv(records, gapSeconds = 30) {
 function transactionsCsv(records, gapSeconds = 30) {
   const transactions = groupTransactions(records, gapSeconds).sort((a, b) => b.assignedMs - a.assignedMs);
   return toCsv(
-    ["Date", "Time", "Location", "User", "Transaction ID", "Containers", "Container Names", "Assignment IDs"],
+    ["Date", "Time", "Location", "User", "Transaction ID", "Containers", "Container Names", "Container Types", "Assignment IDs"],
     transactions.map((transaction) => {
       const stamp = timestampParts(transaction.assignedMs);
       return [
@@ -182,6 +224,7 @@ function transactionsCsv(records, gapSeconds = 30) {
         transaction.id,
         transaction.assignments.length,
         transaction.containers.join(" | "),
+        transaction.containerTypes.join(" | "),
         transaction.assignments.join(" | "),
       ];
     }),
@@ -194,6 +237,7 @@ const Core = {
   normalizeApiRow,
   dedupeAssignments,
   groupTransactions,
+  dailyBreakdown,
   dailyByLocation,
   dailyCsv,
   transactionsCsv,
@@ -324,6 +368,12 @@ const Core = {
       label{display:block;color:#596f6c;font-size:11px;font-weight:700}
       .helper{display:block;margin-top:3px;color:#718481;font-size:10.5px;font-weight:400}
       input{width:100%;margin-top:5px;padding:8px 9px;border:1px solid rgba(18,62,58,.22);border-radius:6px;background:#edf3f1;color:#173331;font:inherit;font-variant-numeric:tabular-nums}
+      .breakdown{margin:15px 0 12px;padding:11px 12px;background:#edf3f1;border:1px solid rgba(18,62,58,.1);border-radius:7px}
+      .breakdown .section-label{margin:0 0 8px}
+      .checks{display:flex;gap:16px;align-items:center}
+      .check{display:flex;gap:7px;align-items:center;color:#294b48;font-size:12px;cursor:pointer}
+      .check input{width:15px;height:15px;margin:0;padding:0;accent-color:#106f68;cursor:pointer}
+      .check:focus-within{outline:2px solid rgba(16,111,104,.3);outline-offset:3px;border-radius:3px}
       .primary,.secondary,.danger{width:100%;border-radius:7px;padding:9px 11px;cursor:pointer;font-weight:750}
       .primary{border:1px solid #106f68;background:#106f68;color:#fff}
       .primary:disabled{opacity:.55;cursor:wait}
@@ -362,6 +412,13 @@ const Core = {
           </label>
         </div>
         <button class="primary" id="sync">Sync new checkouts</button>
+        <div class="breakdown" aria-labelledby="breakdown-label">
+          <span class="section-label" id="breakdown-label">Break daily totals out by</span>
+          <div class="checks">
+            <label class="check"><input id="by-location" type="checkbox" checked> Location</label>
+            <label class="check"><input id="by-type" type="checkbox"> Container type</label>
+          </div>
+        </div>
         <div class="section-label">Downloads</div>
         <div class="exports">
           <button class="secondary" id="daily">↓ Download Daily by Location (.csv)</button>
@@ -526,7 +583,7 @@ const Core = {
         assignment_id
         assigned_on
         user { full_name }
-        container { unique_name corporateClient { name } }
+        container { unique_name type { name } corporateClient { name } }
         from_location { pretty_name }
       }
     }
@@ -579,14 +636,18 @@ const Core = {
     try {
       const existing = await getStoredRows();
       const newestStored = existing.reduce((max, row) => Math.max(max, row.assignedMs || 0), 0);
+      const oldestStored = existing.reduce((min, row) => Math.min(min, row.assignedMs || Infinity), Infinity);
+      const needsTypeBackfill = existing.some((row) => !String(row.containerType || "").trim());
       const days = Math.min(90, Math.max(1, Number($("#days").value) || 14));
-      const cutoff = newestStored ? newestStored - 120000 : Date.now() - days * 86400000;
+      const cutoff = needsTypeBackfill && Number.isFinite(oldestStored)
+        ? oldestStored - 120000
+        : newestStored ? newestStored - 120000 : Date.now() - days * 86400000;
       const capture = await waitForAssignmentsRequest();
       const pulled = [];
       let reachedCutoff = false;
       let page = 1;
       while (page <= MAX_PAGES && !reachedCutoff) {
-        say(`Fetching page ${page}… ${pulled.length.toLocaleString()} rows received.`);
+        say(`${needsTypeBackfill ? "Adding container types" : "Fetching new checkouts"}, page ${page}… ${pulled.length.toLocaleString()} rows received.`);
         const rawRows = await fetchPage(capture, page);
         if (!rawRows.length) break;
         for (const raw of rawRows) {
@@ -634,12 +695,36 @@ const Core = {
     syncButton.onclick = () => { location.href = "https://admin.usefull.us/assignments"; };
   }
 
+  function breakdownOptions() {
+    return {
+      byLocation: $("#by-location").checked,
+      byContainerType: $("#by-type").checked,
+    };
+  }
+
+  function breakdownLabel(options = breakdownOptions()) {
+    if (options.byLocation && options.byContainerType) return "Location + Container Type";
+    if (options.byLocation) return "Location";
+    if (options.byContainerType) return "Container Type";
+    return "Date";
+  }
+
+  function updateDailyButton() {
+    $("#daily").textContent = `↓ Download Daily by ${breakdownLabel()} (.csv)`;
+  }
+
+  $("#by-location").onchange = updateDailyButton;
+  $("#by-type").onchange = updateDailyButton;
+  updateDailyButton();
+
   $("#daily").onclick = async () => {
     const rows = await refreshState();
     if (!rows.length) return say("Sync at least once before downloading a report.", true);
     const stamp = Core.timestampParts(Date.now()).date;
-    download(`daily-by-location-${stamp}.csv`, Core.dailyCsv(rows, Number($("#gap").value) || 30));
-    say("Daily by Location downloaded.");
+    const options = breakdownOptions();
+    const slug = breakdownLabel(options).toLowerCase().replaceAll(" + ", "-and-").replaceAll(" ", "-");
+    download(`daily-by-${slug}-${stamp}.csv`, Core.dailyCsv(rows, Number($("#gap").value) || 30, options));
+    say(`Daily by ${breakdownLabel(options)} downloaded.`);
   };
   $("#detail").onclick = async () => {
     const rows = await refreshState();

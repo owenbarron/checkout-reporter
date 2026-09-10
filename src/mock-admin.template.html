@@ -24,9 +24,9 @@
   <script>
     window.__CHECKOUT_REPORTER_TEST_MODE__ = true;
     const fixtureRows = [
-      {assignment_id:101,assigned_on:"2026-08-27T22:00:00.000Z",user:{full_name:"Taylor Example"},container:{unique_name:"Sample Container 1",corporateClient:{name:"Example University"}},from_location:{pretty_name:"Campus Cafe"}},
-      {assignment_id:102,assigned_on:"2026-08-27T22:00:12.000Z",user:{full_name:"Taylor Example"},container:{unique_name:"Sample Container 2",corporateClient:{name:"Example University"}},from_location:{pretty_name:"Campus Cafe"}},
-      {assignment_id:103,assigned_on:"2026-08-27T22:01:00.000Z",user:{full_name:"Morgan Example"},container:{unique_name:"Sample Container 3",corporateClient:{name:"Example University"}},from_location:{pretty_name:"Campus Cafe"}}
+      {assignment_id:101,assigned_on:"2026-08-27T22:00:00.000Z",user:{full_name:"Taylor Example"},container:{unique_name:"Sample Container 1",type:{name:"Cup"},corporateClient:{name:"Example University"}},from_location:{pretty_name:"Campus Cafe"}},
+      {assignment_id:102,assigned_on:"2026-08-27T22:00:12.000Z",user:{full_name:"Taylor Example"},container:{unique_name:"Sample Container 2",type:{name:"Bowl"},corporateClient:{name:"Example University"}},from_location:{pretty_name:"Campus Cafe"}},
+      {assignment_id:103,assigned_on:"2026-08-27T22:01:00.000Z",user:{full_name:"Morgan Example"},container:{unique_name:"Sample Container 3",type:{name:"Cup"},corporateClient:{name:"Example University"}},from_location:{pretty_name:"Campus Cafe"}}
     ];
     if (new URLSearchParams(location.search).has("multi")) {
       fixtureRows[2] = {...fixtureRows[2], container:{...fixtureRows[2].container, corporateClient:{name:"Example College"}}};
